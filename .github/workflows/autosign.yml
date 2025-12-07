@@ -76,6 +76,9 @@ jobs:
         
     - name: 执行自动签到
       env:
+        PYTHONUNBUFFERED: 1
+        UDC_CHROMEDRIVER_VERSION: "142"
+
         # 必需配置
         SITE_USERNAME: ${{ secrets.SITE_USERNAME }}
         SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
