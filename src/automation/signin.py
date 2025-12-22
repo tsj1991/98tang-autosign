@@ -156,7 +156,13 @@ class SignInManager:
         """
         登录网站（直达登录页）
         """
-        try:
+        try:  
+            cookies_str = os.getenv("SITE_COOKIES", "").strip()
+            if cookies_str:
+            ...
+
+
+            
             self.logger.info("开始登录流程（直达登录页）")
 
             login_url = f"{self.base_url}/member.php?mod=logging&action=login"
