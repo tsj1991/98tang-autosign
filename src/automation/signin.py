@@ -212,10 +212,11 @@ class SignInManager:
             return None
 
     def login(self) -> bool:
-    """
-    登录网站（直达登录页，避免首页/弹窗失效问题）
-    """
-    try:
+        """
+        登录网站（直达登录页，避免首页/弹窗失效问题）
+        
+        """
+        try:
         self.logger.info("开始登录流程（直达登录页）")
 
         login_url = f"{self.base_url}/member.php?mod=logging&action=login"
