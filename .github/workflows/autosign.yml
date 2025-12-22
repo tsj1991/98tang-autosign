@@ -1,200 +1,112 @@
 # 98tang Auto Sign-in
-# 完整配置说明请参考: docs/configuration.md
 name: 98tang Auto Sign-in
 
 on:
   schedule:
-    # 每天北京时间0:00执行 (UTC+8 = UTC+0-8, 所以0点对应UTC 16点)
+    # 每天北京时间 06:40（UTC 22:40）
     - cron: '40 22 * * *'
   workflow_dispatch:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
 
 jobs:
-  # Environment secrets模式（优先）- 使用98tang-autosign环境
-  autosign-environment:
+  autosign:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: 98tang-autosign
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
 
-    # ★★★★★ 关键修复点：这里设置全局环境变量 ★★★★★
     env:
+      # chromedriver 版本
       UDC_CHROMEDRIVER_VERSION: "142"
-    # ★★★★★ END ★★★★★
 
-    outputs:
-      failure_reason: ${{ steps.check_config.outputs.failure_reason }}
-    
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
-      
-    - name: 设置 Python 环境
+
+    - name: 设置 Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-        
+
     - name: 安装系统依赖和中文字体
       run: |
         sudo apt-get update
         sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra language-pack-zh-hans
         sudo fc-cache -fv
-        echo "✅ 已安装的中文字体:"
-        fc-list :lang=zh | head -5
-        
-    - name: 安装Python依赖
+
+    - name: 安装 Python 依赖
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        
-    - name: 验证必需配置
-      id: check_config
-      run: |
-        if [ -z "${{ secrets.SITE_USERNAME }}" ] || [ -z "${{ secrets.SITE_PASSWORD }}" ]; then
-          echo "❌ 缺少必需的 Environment Secrets 配置"
-          echo "failure_reason=missing_environment_secrets" >> $GITHUB_OUTPUT
-          exit 1
-        fi
-        echo "✅ 配置验证通过 (Environment secrets模式: 98tang-autosign)"
-        
+
     - name: 显示执行时间
       run: |
-        echo "⏰ 当前UTC时间: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "⏰ UTC 时间: $(date '+%Y-%m-%d %H:%M:%S')"
         echo "🌏 北京时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
-        
+
     - name: 执行自动签到
       env:
         PYTHONUNBUFFERED: 1
 
-        # 必需配置
+        # ===== 核心账号配置 =====
         SITE_USERNAME: ${{ secrets.SITE_USERNAME }}
         SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
-        
-        # 安全提问配置
+
+        # ★★★★★ 关键修复点：Cookie 注入 ★★★★★
+        SITE_COOKIES: ${{ secrets.SITE_COOKIES }}
+        # ★★★★★ END ★★★★★
+
+        # ===== 安全提问 =====
         ENABLE_SECURITY_QUESTION: ${{ vars.ENABLE_SECURITY_QUESTION || 'false' }}
         SECURITY_QUESTION: ${{ secrets.SECURITY_QUESTION }}
         SECURITY_ANSWER: ${{ secrets.SECURITY_ANSWER }}
-        
-        # 核心功能配置
+
+        # ===== 基础配置 =====
         BASE_URL: ${{ vars.BASE_URL || 'https://www.sehuatang.org' }}
         ENABLE_CHECKIN: ${{ vars.ENABLE_CHECKIN || 'true' }}
-        
-        # 拟人化行为配置
+
+        # ===== 拟人化配置 =====
         ENABLE_REPLY: ${{ vars.ENABLE_REPLY || 'true' }}
         REPLY_COUNT: ${{ vars.REPLY_COUNT || '2' }}
         ENABLE_RANDOM_BROWSING: ${{ vars.ENABLE_RANDOM_BROWSING || 'true' }}
         BROWSE_PAGE_COUNT: ${{ vars.BROWSE_PAGE_COUNT || '3' }}
         COMMENT_INTERVAL: ${{ vars.COMMENT_INTERVAL || '15' }}
         WAIT_AFTER_LOGIN: ${{ vars.WAIT_AFTER_LOGIN || '5' }}
-        REPLY_MESSAGES: ${{ vars.REPLY_MESSAGES || '感谢分享资源，收藏了;好资源收藏了，谢谢楼主;感谢楼主的精彩分享;谢谢分享，感谢精彩资源;好内容，支持一下楼主' }}
-        
-        # 延迟优化配置
+        REPLY_MESSAGES: ${{ vars.REPLY_MESSAGES || '感谢分享资源，收藏了;好资源收藏了，谢谢楼主' }}
+
+        # ===== 延迟配置 =====
         TIMING_MULTIPLIER: ${{ vars.TIMING_MULTIPLIER || '1.0' }}
         ENABLE_SMART_TIMING: ${{ vars.ENABLE_SMART_TIMING || 'true' }}
-        
-        # Telegram通知配置
+
+        # ===== Telegram =====
         ENABLE_TELEGRAM_NOTIFICATION: ${{ vars.ENABLE_TELEGRAM_NOTIFICATION || 'false' }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         TELEGRAM_PROXY_URL: ${{ secrets.TELEGRAM_PROXY_URL }}
         TELEGRAM_SEND_LOG_FILE: ${{ vars.TELEGRAM_SEND_LOG_FILE || 'true' }}
         TELEGRAM_SEND_SCREENSHOT: ${{ vars.TELEGRAM_SEND_SCREENSHOT || 'false' }}
-        
-        # 系统配置
+
+        # ===== 系统 =====
         HEADLESS: 'true'
         LOG_LEVEL: ${{ vars.LOG_LEVEL || 'DEBUG' }}
         MAX_LOG_FILES: ${{ vars.MAX_LOG_FILES || '7' }}
         MAX_RETRIES: ${{ vars.MAX_RETRIES || '3' }}
         TIMEOUT_MINUTES: ${{ vars.TIMEOUT_MINUTES || '5' }}
 
-        # 中文环境
-        LANG: 'zh_CN.UTF-8'
-        LC_ALL: 'zh_CN.UTF-8'
-        PYTHONIOENCODING: 'utf-8'
+        # ===== 中文环境 =====
+        LANG: zh_CN.UTF-8
+        LC_ALL: zh_CN.UTF-8
+        PYTHONIOENCODING: utf-8
         PYTHONUTF8: '1'
-        
+
       run: |
         echo "🚀 开始执行自动签到..."
         python main.py
-        
+
     - name: 上传日志
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: autosign-logs-environment-${{ github.run_number }}
-        path: logs/
-        retention-days: 30
-        
-    - name: 执行结果通知
-      if: always()
-      run: |
-        if [ $? -eq 0 ]; then
-          echo "✅ 自动签到执行成功"
-        else
-          echo "❌ 自动签到执行失败"
-        fi
-
-  # Repository secrets模式（智能回退）
-  autosign-repository:
-    if: failure() && needs.autosign-environment.result == 'failure' && needs.autosign-environment.outputs.failure_reason == 'missing_environment_secrets' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
-    needs: autosign-environment
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    # ★★★★★ 回退模式也必须设置 ★★★★★
-    env:
-      UDC_CHROMEDRIVER_VERSION: "142"
-    # ★★★★★ END ★★★★★
-
-    steps:
-    - name: 检出代码
-      uses: actions/checkout@v4
-
-    - name: 设置 Python 环境
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-
-    - name: 安装系统依赖和中文字体
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra language-pack-zh-hans
-        sudo fc-cache -fv
-        
-    - name: 安装Python依赖
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: 验证必需配置
-      run: |
-        if [ -z "${{ secrets.SITE_USERNAME }}" ] || [ -z "${{ secrets.SITE_PASSWORD }}" ]; then
-          echo "❌ Repository Secrets 不完整"
-          exit 1
-        fi
-        echo "✅ 配置验证通过 (Repository secrets模式)"
-        
-    - name: 执行自动签到
-      env:
-        # 必需配置
-        SITE_USERNAME: ${{ secrets.SITE_USERNAME }}
-        SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
-        
-        # 其余配置完全复制（略，与上方一致）
-        
-        HEADLESS: 'true'
-        
-      run: |
-        echo "🚀 开始执行自动签到 (回退模式)"
-        python main.py
-        
-    - name: 上传日志
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: autosign-logs-repository-${{ github.run_number }}
+        name: autosign-logs-${{ github.run_number }}
         path: logs/
         retention-days: 30
