@@ -312,107 +312,75 @@ class SignInManager:
             return False
 
     def login(self) -> bool:
-        """
-        登录网站
+    """
+    登录网站（直达登录页，避免首页/弹窗失效问题）
+    """
+    try:
+        self.logger.info("开始登录流程（直达登录页）")
 
-        Returns:
-            是否登录成功
-        """
-        try:
-            self.logger.info("开始登录流程")
+        login_url = f"{self.base_url}/member.php?mod=logging&action=login"
+        self.logger.debug(f"访问登录页: {login_url}")
+        self.driver.get(login_url)
+        TimingManager.smart_wait(TimingManager.PAGE_LOAD_DELAY, 1.0, self.logger)
 
-            # 访问首页
-            self.logger.debug(f"访问首页: {self.home_url}")
-            self.driver.get(self.home_url)
-            TimingManager.smart_wait(TimingManager.PAGE_LOAD_DELAY, 1.0, self.logger)
+        # 再次处理年龄验证（有些站点会在登录页触发）
+        self.handle_age_verification()
 
-            # 处理年龄验证
-            self.logger.debug("开始处理年龄验证")
-            if not self.handle_age_verification():
-                self.logger.debug("年龄验证处理失败")
-                return False
-
-            # 查找并点击登录按钮
-            login_selectors = [
-                "//button[@type='submit']//em[contains(text(), '登录')]/..",
-                "//button[contains(text(), '登录')]",
-                "#loginsubmit",
-            ]
-
-            login_button = self.element_finder.find_clickable_by_selectors(
-                login_selectors
-            )
-            if not login_button:
-                self.logger.error("未找到登录按钮")
-                return False
-
-            button_text = login_button.text
-            self.logger.debug(f"找到登录按钮，文本: '{button_text}'，准备点击")
-            BrowserHelper.safe_click(self.driver, login_button, self.logger)
-            TimingManager.smart_wait(TimingManager.NAVIGATION_DELAY, 1.0, self.logger)
-
-            # 等待登录弹窗
-            self.logger.debug("等待登录弹窗出现")
-            login_popup = self.element_finder.find_by_selectors(
-                ["#fwin_login"], timeout=5
-            )
-            if not login_popup:
-                self.logger.warning("未检测到登录弹窗")
-            else:
-                self.logger.debug("登录弹窗已出现")
-
-            # 填写登录表单
-            self.logger.debug("开始填写登录表单")
-            if not self.fill_login_form():
-                self.logger.debug("登录表单填写失败")
-                return False
-
-            # 处理安全提问
-            self.logger.debug("处理安全提问")
-            if not self.handle_security_question():
-                self.logger.warning("安全提问处理失败，继续尝试")
-
-            # 提交登录
-            submit_selectors = [
-                "#fwin_login button[type='submit']",
-                "button[type='submit']",
-                "#loginsubmit",
-            ]
-
-            submit_button = self.element_finder.find_clickable_by_selectors(
-                submit_selectors
-            )
-            if not submit_button:
-                self.logger.error("未找到提交按钮")
-                return False
-
-            submit_text = submit_button.text
-            self.logger.debug(f"找到提交按钮，文本: '{submit_text}'，准备提交登录")
-            BrowserHelper.safe_click(self.driver, submit_button, self.logger)
-            TimingManager.adaptive_wait(
-                TimingManager.PAGE_LOAD_DELAY, "complex", self.logger
-            )
-
-            # 验证登录结果
-            self.logger.debug("验证登录结果")
-            login_result = self.check_login_status()
-            if login_result:
-                self.logger.info("登录成功")
-                return True
-            else:
-                # 检查是否是账号锁定
-                error_message = self.check_login_error_message()
-                if error_message and "密码错误次数过多" in error_message:
-                    self.logger.error(f"账号被锁定: {error_message}")
-                    # 如果是账号锁定，不要继续重试，直接返回失败
-                    raise Exception(f"账号锁定: {error_message}")
-                else:
-                    self.logger.warning("登录失败")
-                    return False
-
-        except Exception as e:
-            self.logger.error(f"登录过程出错: {e}")
+        # 等待用户名输入框出现（作为登录页标志）
+        username_input = self.element_finder.find_by_selectors(
+            ["input[name='username']", "#username"], timeout=10
+        )
+        if not username_input:
+            self.logger.error("未检测到登录表单，可能未成功进入登录页")
             return False
+
+        # 填写登录表单
+        self.logger.debug("开始填写登录表单")
+        if not self.fill_login_form():
+            self.logger.error("登录表单填写失败")
+            return False
+
+        # 处理安全提问（如果有）
+        self.logger.debug("处理安全提问（如存在）")
+        self.handle_security_question()
+
+        # 提交登录（Discuz 标准）
+        submit_button = self.element_finder.find_clickable_by_selectors(
+            ["#loginsubmit", "button[type='submit']", "input[type='submit']"],
+            timeout=5,
+        )
+        if not submit_button:
+            self.logger.error("未找到登录提交按钮")
+            return False
+
+        self.logger.debug("点击登录提交按钮")
+        BrowserHelper.safe_click(self.driver, submit_button, self.logger)
+        TimingManager.smart_wait(
+            TimingManager.PAGE_LOAD_DELAY, 1.5, self.logger
+        )
+
+        # 校验登录状态
+        self.logger.debug("验证登录状态")
+        if self.check_login_status():
+            self.logger.info("✅ 登录成功")
+            return True
+
+        # 检查是否有明确错误信息
+        error_message = self.check_login_error_message()
+        if error_message:
+            self.logger.error(f"登录失败，错误信息: {error_message}")
+            if "密码错误次数过多" in error_message:
+                raise Exception(f"账号锁定: {error_message}")
+            return False
+
+        self.logger.warning("登录失败，未检测到成功标志")
+        return False
+
+    except Exception as e:
+        self.logger.error(f"登录过程出错: {e}")
+        return False
+
+
 
     def calculate_math_answer(self, question: str) -> Optional[int]:
         """
