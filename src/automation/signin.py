@@ -4,6 +4,7 @@
 提供网站登录和签到的核心功能
 """
 
+import os
 import re
 import logging
 from typing import Optional, Dict, Any
@@ -36,44 +37,39 @@ class SignInManager:
         self.security_answer = config.get("security_answer", "")
 
     # =========================
-    # 年龄验证
+    # 年龄验证（备用）
     # =========================
     def handle_age_verification(self) -> bool:
         try:
-            age_selectors = [
+            selectors = [
                 "a[href*='agecheck']",
                 "//a[contains(text(), '满18岁')]",
                 "//a[contains(text(), '请点此进入')]",
             ]
-            link = self.element_finder.find_by_selectors(age_selectors, timeout=3)
+            link = self.element_finder.find_by_selectors(selectors, timeout=3)
             if link:
-                self.logger.info("检测到年龄验证，正在点击")
                 BrowserHelper.safe_click(self.driver, link, self.logger)
                 TimingManager.smart_page_wait(
                     self.driver, ["body", "#main", ".wp"], self.logger
                 )
             return True
         except Exception as e:
-            self.logger.warning(f"年龄验证处理失败: {e}")
+            self.logger.debug(f"年龄验证处理异常: {e}")
             return True
 
     # =========================
-    # 登录表单填写
+    # 填写登录表单（备用）
     # =========================
     def fill_login_form(self) -> bool:
         try:
             username_input = self.element_finder.find_by_selectors(
                 ["input[name='username']", "#username"]
             )
-            if not username_input:
-                self.logger.error("未找到用户名输入框")
-                return False
-
             password_input = self.element_finder.find_by_selectors(
                 ["input[name='password']", "#password"]
             )
-            if not password_input:
-                self.logger.error("未找到密码输入框")
+
+            if not username_input or not password_input:
                 return False
 
             username_input.clear()
@@ -83,12 +79,11 @@ class SignInManager:
             password_input.send_keys(self.password)
 
             return True
-        except Exception as e:
-            self.logger.error(f"填写登录表单失败: {e}")
+        except Exception:
             return False
 
     # =========================
-    # 安全提问
+    # 安全提问（备用）
     # =========================
     def handle_security_question(self) -> bool:
         if not self.enable_security_question:
@@ -117,12 +112,11 @@ class SignInManager:
                 answer_input.send_keys(self.security_answer)
 
             return True
-        except Exception as e:
-            self.logger.error(f"安全提问处理失败: {e}")
+        except Exception:
             return False
 
     # =========================
-    # 登录状态检查
+    # 登录状态判断
     # =========================
     def check_login_status(self) -> bool:
         try:
@@ -150,21 +144,56 @@ class SignInManager:
         return None
 
     # =========================
-    # ✅ 唯一登录入口（重点）
+    # ✅ 唯一登录入口（Cookie 优先）
     # =========================
     def login(self) -> bool:
         """
-        登录网站（直达登录页）
+        登录网站
+        - 优先使用 SITE_COOKIES（绕过 Cloudflare / 18+）
+        - 无 Cookie 时回退表单登录
         """
-        try:  
+        try:
+            # ===== Cookie 登录 =====
             cookies_str = os.getenv("SITE_COOKIES", "").strip()
             if cookies_str:
-            ...
+                self.logger.info("检测到 SITE_COOKIES，尝试使用 Cookie 登录")
 
+                # 必须先访问一次域名
+                self.driver.get(self.base_url)
+                TimingManager.smart_wait(
+                    TimingManager.PAGE_LOAD_DELAY, 1.0, self.logger
+                )
 
-            
-            self.logger.info("开始登录流程（直达登录页）")
+                for cookie in cookies_str.split(";"):
+                    if "=" not in cookie:
+                        continue
+                    name, value = cookie.strip().split("=", 1)
+                    try:
+                        self.driver.add_cookie(
+                            {
+                                "name": name,
+                                "value": value,
+                                "domain": ".sehuatang.org",
+                                "path": "/",
+                            }
+                        )
+                    except Exception as e:
+                        self.logger.debug(f"添加 Cookie 失败: {name}, {e}")
 
+                # 刷新应用 Cookie
+                self.driver.get(self.base_url)
+                TimingManager.smart_wait(
+                    TimingManager.PAGE_LOAD_DELAY, 1.5, self.logger
+                )
+
+                if self.check_login_status():
+                    self.logger.info("✅ Cookie 登录成功，已跳过登录流程")
+                    return True
+                else:
+                    self.logger.warning("Cookie 登录未生效，回退表单登录")
+
+            # ===== 表单登录（备用）=====
+            self.logger.info("开始表单登录流程")
             login_url = f"{self.base_url}/member.php?mod=logging&action=login"
             self.driver.get(login_url)
             TimingManager.smart_wait(
@@ -174,6 +203,7 @@ class SignInManager:
             self.handle_age_verification()
 
             if not self.fill_login_form():
+                self.logger.error("未找到登录表单")
                 return False
 
             self.handle_security_question()
@@ -192,7 +222,7 @@ class SignInManager:
             )
 
             if self.check_login_status():
-                self.logger.info("✅ 登录成功")
+                self.logger.info("✅ 表单登录成功")
                 return True
 
             error = self.check_login_error_message()
